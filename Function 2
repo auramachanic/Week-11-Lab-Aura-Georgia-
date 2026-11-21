@@ -1,0 +1,93 @@
+Also feel free to change whatever obv idk how perfect this is but it does seem to be working
+
+{r}
+# Solution (for tests):
+
+simulate_arrivals <- function(rates, start_time, end_time, tz = "UTC") {
+  
+  # input checks
+  if (!is.data.frame(rates)){
+    stop("rates must be a data frame")
+  } 
+  needed <- c("origin", "destination", "hour", "rate")
+  missing_cols <- needed[!(needed %in% names(rates))]
+  if (length(missing_cols) > 0) {
+    stop("rates is missing columns")
+  }
+  if (sum(rates$rate < 0, na.rm = TRUE) > 0) {
+    stop("rates must not be negative")
+  }
+  start_time <- as.POSIXct(start_time, tz = tz)
+  end_time <- as.POSIXct(end_time, tz = tz)
+  if (is.na(start_time) | is.na(end_time)){
+    stop("start_time and end_time must each be a valid date/time")
+  }
+  if (end_time <= start_time) { 
+    stop("end_time must be after start_time")
+  }
+  
+  # making sure start and end times are numeric
+  start_n <- as.numeric(start_time)
+  end_n <- as.numeric(end_time)
+
+  # starting with one empty table
+  arrivals <- data.frame(origin = character(), destination = character(),
+                         arrival_time = as.POSIXct(character(), tz = tz))
+  pairs <- unique(rates[, c("origin", "destination")])
+
+  for (i in 1:nrow(pairs)) {
+    s <- as.character(pairs$origin[i])
+    t <- as.character(pairs$destination[i])
+    sub <- rates[rates$origin == pairs$origin[i] &
+                 rates$destination == pairs$destination[i], ]
+
+    # creating 24 hourly rates for each pair
+    hourly <- rep(0, 24)
+    hourly[sub$hour + 1] <- sub$rate
+    hourly[is.na(hourly)] <- 0
+
+    M <- max(hourly)
+    if (M > 0) {
+      # candidate times dervived from homogeneous Poisson process 
+      candidates <- numeric(0)
+      candidate_time <- start_n + rexp(1, rate = M) * 3600
+      while (candidate_time < end_n) {
+        candidates <- c(candidates, candidate_time)
+        candidate_time <- candidate_time + rexp(1, rate = M) * 3600
+      }
+
+      # checking which candidate times should be kept (thinning)
+      for (u in candidates) {
+        u_time <- as.POSIXct(u, origin = "1970-01-01", tz = tz)
+        h <- as.integer(format(u_time, "%H", tz = tz))
+        if (runif(1) < (hourly[h + 1] / M)) {
+          arrivals <- rbind(arrivals,
+                            data.frame(origin = s, destination = t, arrival_time = u_time))
+        }
+      }
+    }
+  }
+
+  arrivals <- arrivals[order(arrivals$arrival_time), ]
+  arrivals
+}
+
+# testing with first function
+rates <- estimate_arrival_rates(bike, "2022-02-16", "2022-02-22")
+sim <- simulate_arrivals(rates, "2022-02-23 00:00:00", "2022-02-24 00:00:00")
+head(sim)
+
+#checks
+# rate is 0 except in hour 10, so every arrival must fall into hour 10
+r1 <- data.frame(origin = "A", destination = "B", hour = 0:23,
+                 rate = c(rep(0, 10), 6, rep(0, 13)))
+s1 <- simulate_arrivals(r1, "2022-02-23 00:00:00", "2022-02-24 00:00:00")
+testthat::expect_true(nrow(s1) > 0)
+testthat::expect_equal(sum(format(s1$arrival_time, "%H") != "10"), 0)
+
+# all-zero or all-NA rates give an empty table
+r2 <- data.frame(origin = "A", destination = "B", hour = 0:23, rate = NA)
+testthat::expect_equal(nrow(simulate_arrivals(r2, "2022-02-23", "2022-02-24")), 0)
+
+# invalid input (start time after end time)
+testthat::expect_error(simulate_arrivals(r1, "2022-02-24", "2022-02-23"))
