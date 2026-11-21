@@ -1,0 +1,63 @@
+# Solution (for tests):
+
+read_csv("/Users/aura/Downloads/course_files_export/Data/sample_bike.csv")
+
+estimate_arrival_rates <- function(data, window_start, window_end, truck = "R", tz = "UTC") {
+
+  # input checks
+  if (!is.data.frame(data)) stop("data must be a data frame")
+  needed <- c("start_station", "end_station", "start_time", "end_time")
+  if (!all(needed %in% names(data)))
+    stop("data is missing column(s): ",
+         paste(setdiff(needed, names(data))))
+
+  win_start <- as.POSIXct(window_start, tz = tz)
+  win_end <- as.POSIXct(window_end, tz = tz)
+  if (length(win_start) != 1 || length(win_end) != 1 ||
+      is.na(win_start) || is.na(win_end))
+    stop("window_start and window_end must each be a single valid date-time")
+  if (win_end <= win_start) stop("window_end must be after window_start")
+  n_days <- as.numeric(difftime(win_end, win_start, units = "days"))
+  if (format(win_start, "%H:%M:%S", tz = tz) != "00:00:00" ||
+      abs(n_days - round(n_days)) > 1e-8)
+    stop("window must start at midnight and cover a whole number of days")
+  n_days <- round(n_days)
+  win_start_n <- as.numeric(win_start)
+  win_end_n <- as.numeric(win_end)
+  
+  #setting up columns
+  data$start_station <- as.character(data$start_station)
+  data$end_station <- as.character(data$end_station)
+  data$start_time <- as.POSIXct(data$start_time, tz = tz)
+  data$end_time <- as.POSIXct(data$end_time, tz = tz)
+  
+  # add code here to filter missing rows i will return
+  
+  e1 <- data.frame(station = bike$end_station[bike_added],
+                   time = bike$end_time[bike_added],
+                   change = 1, event_type = "R", kind = 1,
+                   row = which(bike_added))
+  e2 <- data.frame(station = bike$start_station[customer],
+                   time = bike$start_time[customer],
+                   change = -1, event_type = "C", kind = 2,
+                   row = which(customer))
+  e3 <- data.frame(station = bike$end_station[customer],
+                   time = bike$end_time[customer],
+                   change = 1, event_type = "C", kind = 3,
+                   row = which(customer))
+  events <- rbind(e1, e2, e3)
+  if (sum(bike_removed) > 0) {
+    e4 <- data.frame(station = bike$start_station[bike_removed],
+                     time = bike$start_time[bike_removed],
+                     change = -1, event_type = "R", kind = 4,
+                     row = which(bike_removed))
+    events <- rbind(events, e4)
+  }
+  
+  # sorting by time
+  events <- events %>%
+    arrange(time)
+  
+  
+  
+}
