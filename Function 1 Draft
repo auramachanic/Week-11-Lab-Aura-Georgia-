@@ -61,3 +61,193 @@ estimate_arrival_rates <- function(data, window_start, window_end, truck = "R", 
   
   
 }
+
+#Georgia New Function addition - feel free to change anything
+
+# Solution (for tests):
+
+#' Estimating NHPP Arrival Rates
+#' 
+#' @description Estimates arrival rates from NHPP trips
+#' 
+#' @param data Dataframe containing start and end stations, with their corresponding times. 
+#' @param window_start Window start date and time in year, month, day, and time of day format
+#' @param window_end Window end date and time in year, month, day, and time of day format
+#' @param truck Determining rebalancing variable
+#' @param tz Timezone of dataset
+
+#' @return dataframe estimating unique origin-destination trip rates and availability within time window. 
+
+
+estimate_arrival_rates <- function(data, window_start, window_end, truck = "R", tz = "UTC") {
+
+  # input checks
+  if (!is.data.frame(data)) stop("data must be a data frame")
+  needed <- c("start_station", "end_station", "start_time", "end_time")
+  if (!all(needed %in% names(data)))
+    stop("data is missing column(s): ",
+         paste(setdiff(needed, names(data))))
+
+  win_start <- as.POSIXct(window_start, tz = tz)
+  win_end <- as.POSIXct(window_end, tz = tz)
+  if (length(win_start) != 1 || length(win_end) != 1 ||
+      is.na(win_start) || is.na(win_end))
+    stop("window_start and window_end must each be a single valid date-time")
+  if (win_end <= win_start) stop("window_end must be after window_start")
+  n_days <- as.numeric(difftime(win_end, win_start, units = "days"))
+  if (format(win_start, "%H:%M:%S", tz = tz) != "00:00:00" ||
+      abs(n_days - round(n_days)) > 1e-8)
+    stop("window must start at midnight and cover a whole number of days")
+  n_days <- round(n_days)
+  win_start_n <- as.numeric(win_start)
+  win_end_n <- as.numeric(win_end)
+  
+  #setting up columns
+  data$start_station <- as.character(data$start_station)
+  data$end_station <- as.character(data$end_station)
+  data$start_time <- as.POSIXct(data$start_time, tz = tz)
+  data$end_time <- as.POSIXct(data$end_time, tz = tz)
+  
+  # add code here to filter missing rows i will return
+  
+  #Filtering out missing stations and times
+  bike <- data[!is.na(data$start_station) & !is.na(data$end_station) &
+               !is.na(data$start_time) & !is.na(data$end_time) &
+               data$end_time >= data$start_time, ]
+
+  # Determining whether bike was added, removed, or customer action
+  bike_added   <- bike$start_station == truck & bike$end_station != truck
+  bike_removed <- bike$start_station != truck & bike$end_station == truck
+  customer     <- bike$start_station != truck & bike$end_station != truck
+  
+  e1 <- data.frame(station = bike$end_station[bike_added],
+                   time = bike$end_time[bike_added],
+                   change = 1, event_type = "R", kind = 1,
+                   row = which(bike_added))
+  e2 <- data.frame(station = bike$start_station[customer],
+                   time = bike$start_time[customer],
+                   change = -1, event_type = "C", kind = 2,
+                   row = which(customer))
+  e3 <- data.frame(station = bike$end_station[customer],
+                   time = bike$end_time[customer],
+                   change = 1, event_type = "C", kind = 3,
+                   row = which(customer))
+  events <- rbind(e1, e2, e3)
+  if (sum(bike_removed) > 0) {
+    e4 <- data.frame(station = bike$start_station[bike_removed],
+                     time = bike$start_time[bike_removed],
+                     change = -1, event_type = "R", kind = 4,
+                     row = which(bike_removed))
+    events <- rbind(events, e4)
+  }
+  
+  # sorting by time
+  events <- events %>%
+    arrange(time)
+  
+  #sorting by unique station
+  stations <- sort(unique(c(bike$start_station, bike$end_station)))
+  stations <- stations[stations != truck]
+  
+  #Creating a list for available bikes
+  available <- list()
+  
+  #Looping through each station
+  for (current_station in stations) {
+    #Filtering the events for each station
+    station_events <- events %>% 
+      filter(current_station == station, time >= win_start, time < win_end)
+    
+    # Finding starting bikes
+    running <- 0 #Current counter
+    start_bike_estimate <- 0 #Finding the amount of start bikes
+    
+      #Looping through each station
+    for (i in seq_len(nrow(station_events))) {
+      #Adding to running total based on change 
+      running <- running + station_events$change[i] 
+      #Updating known start amount of stations
+      if (running < start_bike_estimate) {
+        start_bike_estimate <- running
+      }
+    }
+    #Finding amount of bikes 
+    bikes <- -start_bike_estimate
+   
+   #Sorting different hour windows by station_events  
+   times <- sort(unique(c(seq(win_start, win_end, by = "hour"), station_events$time)))
+   
+   #Creating empty available by hour vector
+    available_by_hour <- numeric(24)
+    
+    #Iterating through each time interval
+    for (i in seq_len(length(times) - 1)) {
+      #Current time
+      current_time <- times[i]
+      #Next time period
+      time_next <- times[i + 1]
+      
+     #Number of bikes 
+      bikes <- bikes + sum(station_events$change[station_events$time == current_time])
+      
+      # Establishing if there is a bike available
+      if (bikes >= 1) {
+        #Find hour in time and converting to index in vector
+        h <- as.integer(format(current_time, "%H", tz = tz)) + 1
+        #Determining howmany are available at each hour
+        available_by_hour[h] <- available_by_hour[h] + as.numeric(difftime(time_next, current_time, units = "hours"))
+      }
+    }
+    
+    #Storing each station's availablility
+    available[[current_station]] <- data.frame(
+      origin = current_station,
+      hour = 0:23,
+      availability = available_by_hour / n_days,
+      stringsAsFactors = FALSE
+    )
+    
+  }
+  
+  #Binding rows to make dataframe for availability
+  availability_dataframe <- bind_rows(available)
+  
+  #Formatting observation dataframe
+  observations <- bike %>%
+    filter(customer, start_time >= win_start, start_time < win_end) %>%
+    mutate(hour = as.integer(format(start_time, "%H", tz = tz))) %>%
+    count(origin = start_station, destination = end_station, hour) %>%
+    mutate(observed_rate = n / n_days) 
+
+  
+   #Adding dataframe for destinations
+   destinations <- data.frame(destination = stations, stringsAsFactors = FALSE)
+
+  result <- availability_dataframe %>%
+    #Adding destination to results
+    full_join(destinations, by = character()) %>%
+    #Adding in our observations
+    left_join(observations, by = c("origin", "destination", "hour")) %>%
+    #Selecting our wanted variables from table
+    select(origin, destination, hour, observed_rate, availability) %>%
+    #Creating the different rates
+    mutate(
+      observed_rate = ifelse(is.na(observed_rate), 0, observed_rate),
+      rate = ifelse(availability > 0, observed_rate / availability, NA_real_)
+    )
+#Returning output
+  return(result)
+
+}
+
+#Reading bikes
+bikes <-read_csv("Data/sample_bike.csv")
+
+#Testing data
+sample<- estimate_arrival_rates(bikes,window_start = "2022-02-16 00:00:00",
+window_end   = "2022-02-21 00:00:00" )
+
+
+head(sample)
+
+
