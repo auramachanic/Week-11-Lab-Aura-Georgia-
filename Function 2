@@ -1,7 +1,14 @@
-Also feel free to change whatever obv idk how perfect this is but it does seem to be working
+#' Simulating NHPP Arrivals
+#' 
+#' @description Simulates NHPP arrival rates
+#' 
+#' @param rates Dataframe derived from estimate_arrival_rates
+#' @param start_time Start of the simulation interval
+#' @param end_time End of the simulation interval
+#' @param tz Timezone of dataset
 
-{r}
-# Solution (for tests):
+#' @return dataframe with columns origin, destination, and (also sorted by) arrival_time. 
+#' Contains the same number of rows as number of arrivals
 
 simulate_arrivals <- function(rates, start_time, end_time, tz = "UTC") {
   
