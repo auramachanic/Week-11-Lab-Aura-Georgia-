@@ -1,8 +1,4 @@
 
-#Georgia New Function addition - feel free to change anything
-
-# Solution (for tests):
-
 #' Estimating NHPP Arrival Rates
 #' 
 #' @description Estimates arrival rates from NHPP trips
